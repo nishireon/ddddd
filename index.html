@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Block Game with T/N Spins</title>
+<title>Block Game with SRS & High Score</title>
 <style>
 body {
     background:#202325;
@@ -10,19 +10,16 @@ body {
     text-align:center;
     font-family:sans-serif;
 }
-
 #container {
     display:flex;
     justify-content:center;
     gap:20px;
     margin-top:20px;
 }
-
 canvas {
     background:#15181a;
     border:1px solid #555;
 }
-
 .side {
     display:flex;
     flex-direction:column;
@@ -30,8 +27,7 @@ canvas {
     font-size:14px;
     color:#bbb;
 }
-
-#score {
+#score, #highscore {
     font-size:18px;
     margin-top:10px;
     color:#fff;
@@ -57,6 +53,7 @@ canvas {
 </div>
 
 <p id="score">Score: 0</p>
+<p id="highscore">High Score: 0</p>
 
 <p style="margin-top:10px; font-size:13px; color:#aaa;">
 ← → 移動 / ↑ 右回転 / ↓ 落下 / Space:ハードドロップ / C:ホールド
@@ -65,42 +62,27 @@ canvas {
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-
 const holdCtx = document.getElementById("hold").getContext("2d");
 const nextCtxs = Array.from(document.querySelectorAll(".next")).map(c=>c.getContext("2d"));
 
 const COLS=10, ROWS=20, BLOCK=30;
-
 let board = Array.from({length:ROWS},()=>Array(COLS).fill(0));
-const colors=[null, "#fff","#fff","#fff","#fff","#fff","#fff","#fff"];
+const colors=[null,"#fff","#fff","#fff","#fff","#fff","#fff","#fff"];
+const pieces=[[],[[1,1,1,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]],[[1,1],[1,1]],[[0,1,1],[1,1,0]],[[0,1,0],[1,1,1]],[[1,1,0],[0,1,1]]];
 
-const pieces=[
-[],
-[[1,1,1,1]],
-[[1,0,0],[1,1,1]],
-[[0,0,1],[1,1,1]],
-[[1,1],[1,1]],
-[[0,1,1],[1,1,0]],
-[[0,1,0],[1,1,1]], // Tピース
-[[1,1,0],[0,1,1]]
-];
+let nextQueue=[], holdPiece=null, canHold=true, history=[], score=0, highScore=0;
+let lastRotate=false, dropCounter=0, lastTime=0;
 
-let nextQueue=[], holdPiece=null, canHold=true, history=[], score=0;
-let lastRotate=false; // 回転した直後かを保持
+// --- キー長押し対応
+let keys = {ArrowLeft:false, ArrowRight:false, ArrowDown:false};
 
-let player={x:3, y:0, matrix:null, type:0, rotated:false};
+let player={x:3,y:0,matrix:null,type:0,rotated:false};
 
-// --- ランダムピース（3連禁止）
 function randomPiece(){
-    let type;
-    let attempts = 0;
-    do {
-        type = Math.floor(Math.random()*7)+1;
-        attempts++;
-        if(attempts>10) break;
-    } while(history.length>=2 && history[history.length-1]===type && history[history.length-2]===type);
-    history.push(type);
-    if(history.length>2) history.shift();
+    let type, attempts=0;
+    do { type = Math.floor(Math.random()*7)+1; attempts++; if(attempts>10) break;}
+    while(history.length>=2 && history[history.length-1]===type && history[history.length-2]===type);
+    history.push(type); if(history.length>2) history.shift();
     return type;
 }
 
@@ -108,32 +90,18 @@ function fillQueue(){while(nextQueue.length<3) nextQueue.push(randomPiece());}
 
 function newPiece(){
     fillQueue();
-    const type=nextQueue.shift();
-    player.matrix=pieces[type];
-    player.type=type;
-    player.x=3; player.y=0;
-    player.rotated=false;
-    canHold=true;
-    lastRotate=false;
-    fillQueue();
-    drawNext();
-    if(collide()){
-        alert("Game Over");
-        board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
-        score=0;
-        updateScore();
-    }
+    const type = nextQueue.shift();
+    player.matrix = pieces[type]; player.type = type; player.x=3; player.y=0;
+    player.rotated=false; canHold=true; lastRotate=false;
+    fillQueue(); drawNext();
+    if(collide()){ alert("Game Over"); board=Array.from({length:ROWS},()=>Array(COLS).fill(0)); score=0; updateScore(); }
 }
 
-// --- 描画
 function drawBlock(x,y,color,ctx2=ctx,size=BLOCK,alpha=1){
     if(!color) return;
-    ctx2.globalAlpha = alpha;
-    ctx2.fillStyle=color;
-    ctx2.fillRect(x*size,y*size,size,size);
-    ctx2.strokeStyle="#555";
-    ctx2.strokeRect(x*size,y*size,size,size);
-    ctx2.globalAlpha = 1;
+    ctx2.globalAlpha=alpha; ctx2.fillStyle=color; ctx2.fillRect(x*size,y*size,size,size);
+    ctx2.strokeStyle="#555"; ctx2.strokeRect(x*size,y*size,size,size);
+    ctx2.globalAlpha=1;
 }
 
 function draw(){
@@ -144,109 +112,91 @@ function draw(){
     player.matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(player.x+x,player.y+y,colors[v]);}));
 }
 
-// --- 衝突判定
 function getGhostY(){let y=player.y; while(!collideAt(player.x,y+1,player.matrix)) y++; return y;}
 function collideAt(px,py,matrix){for(let y=0;y<matrix.length;y++){for(let x=0;x<matrix[y].length;x++){if(matrix[y][x] && (board[py+y]&&board[py+y][px+x])!==0) return true;}} return false;}
 function collide(){return collideAt(player.x,player.y,player.matrix);}
-
-// --- ミニマップ描画
 function drawMini(matrix,ctx2){ctx2.clearRect(0,0,120,120); matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(x+1,y+1,colors[v],ctx2,20);}));}
 function drawNext(){nextCtxs.forEach((c,i)=>drawMini(pieces[nextQueue[i]],c));}
 function drawHold(){holdCtx.clearRect(0,0,120,120); if(holdPiece) drawMini(pieces[holdPiece],holdCtx);}
-
-// --- ホールド
-function hold(){
-    if(!canHold) return;
-    if(holdPiece===null){holdPiece=player.type; newPiece();}
-    else {[holdPiece,player.type]=[player.type,holdPiece]; player.matrix=pieces[player.type]; player.x=3; player.y=0;}
-    canHold=false;
-    drawHold();
-}
-
-// --- マージ
+function hold(){if(!canHold) return; if(holdPiece===null){holdPiece=player.type; newPiece();} else {[holdPiece,player.type]=[player.type,holdPiece]; player.matrix=pieces[player.type]; player.x=3; player.y=0;} canHold=false; drawHold();}
 function merge(){player.matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) board[player.y+y][player.x+x]=v;}));}
-
-// --- 回転
 function rotateCW(matrix){return matrix[0].map((_,i)=>matrix.map(r=>r[i]).reverse());}
+
+// --- 壁蹴りSRS対応
 function playerRotate(){
-    const old=player.matrix;
-    player.matrix=rotateCW(player.matrix);
-    if(collide()){player.matrix=old; lastRotate=false;} else lastRotate=true;
+    const old = player.matrix;
+    const oldX = player.x;
+    player.matrix = rotateCW(player.matrix);
+    lastRotate=false;
+    const kicks = [0,-1,1,-2,2]; // 壁蹴り補正
+    for(let dx of kicks){
+        player.x = oldX + dx;
+        if(!collide()){ lastRotate=true; return; }
+    }
+    player.matrix = old; player.x = oldX;
 }
 
-// --- 落下
 function playerDrop(){player.y++; if(collide()){player.y--; merge(); clearLines(); newPiece();} dropCounter=0;}
 function hardDrop(){player.y=getGhostY(); merge(); clearLines(); newPiece();}
-
-// --- 移動
 function move(dir){player.x+=dir; if(collide()) player.x-=dir;}
 
-// --- Tスピン判定
-function isTSpin(){
-    if(player.type!==6 || !lastRotate) return false; // Tピースかつ回転直後
-    const cx=player.x+1, cy=player.y+1;
-    let count=0;
-    const corners=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
-    corners.forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;});
-    return count>=3;
-}
+function isTSpin(){if(player.type!==6 || !lastRotate) return false; const cx=player.x+1,cy=player.y+1; let count=0; [[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]].forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;}); return count>=3;}
+function isNSpin(){if(!lastRotate) return false; if([1,2,3,7].includes(player.type)){ const cx=player.x+1,cy=player.y+1; let count=0; [[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]].forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;}); return count>=3;} return false;}
 
-// --- Nスピン判定（IピースやL系も応用可）
-function isNSpin(){ // IピースやL系回転技判定
-    if(!lastRotate) return false;
-    if(player.type===1||player.type===2||player.type===3||player.type===7){
-        // 簡易：4角のうち3つ以上埋まっていたらNスピン
-        const cx=player.x+1, cy=player.y+1;
-        let count=0;
-        const corners=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
-        corners.forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;});
-        return count>=3;
-    }
-    return false;
-}
-
-// --- ライン消去
 function clearLines(){
     let linesCleared=0;
     outer: for(let y=ROWS-1;y>=0;y--){
         for(let x=0;x<COLS;x++){if(board[y][x]===0) continue outer;}
-        board.splice(y,1);
-        board.unshift(Array(COLS).fill(0));
-        y++;
-        linesCleared++;
+        board.splice(y,1); board.unshift(Array(COLS).fill(0)); y++; linesCleared++;
     }
     if(linesCleared>0){
         if(isTSpin()) score+=linesCleared*300;
         else if(isNSpin()) score+=linesCleared*200;
         else score+=linesCleared*100;
+        if(score>highScore) { highScore=score; localStorage.setItem("highScore",highScore);}
         updateScore();
     }
     lastRotate=false;
 }
 
-function updateScore(){document.getElementById("score").innerText="Score: "+score;}
+function updateScore(){document.getElementById("score").innerText="Score: "+score; document.getElementById("highscore").innerText="High Score: "+highScore;}
 
 // --- キー操作
 document.addEventListener("keydown",e=>{
-    if(e.key==="ArrowLeft") move(-1);
-    else if(e.key==="ArrowRight") move(1);
-    else if(e.key==="ArrowDown") playerDrop();
+    if(e.key==="ArrowLeft") keys.ArrowLeft=true;
+    else if(e.key==="ArrowRight") keys.ArrowRight=true;
+    else if(e.key==="ArrowDown") keys.ArrowDown=true;
     else if(e.key==="ArrowUp") playerRotate();
     else if(e.key===" ") hardDrop();
     else if(e.key==="c"||e.key==="C") hold();
 });
+document.addEventListener("keyup",e=>{
+    if(e.key==="ArrowLeft") keys.ArrowLeft=false;
+    else if(e.key==="ArrowRight") keys.ArrowRight=false;
+    else if(e.key==="ArrowDown") keys.ArrowDown=false;
+});
 
-// --- アニメーション
-let dropCounter=0,lastTime=0;
+// --- 長押し対応移動
+function handleKeys(){
+    if(keys.ArrowLeft){ move(-1); }
+    if(keys.ArrowRight){ move(1); }
+    if(keys.ArrowDown){ playerDrop(); }
+}
+
+// --- 初期化
+highScore = localStorage.getItem("highScore")||0;
+newPiece();
+
+// --- ゲームループ
 function update(time=0){
     const delta=time-lastTime; lastTime=time;
     dropCounter+=delta;
     if(dropCounter>1000) playerDrop();
+    handleKeys();
     draw();
     requestAnimationFrame(update);
 }
 
-newPiece();
 update();
 </script>
 
