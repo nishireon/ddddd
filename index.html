@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Block Game</title>
+<title>Block Game with Score</title>
 <style>
 body {
     background:#202325;
@@ -30,6 +30,12 @@ canvas {
     font-size:14px;
     color:#bbb;
 }
+
+#score {
+    font-size:18px;
+    margin-top:10px;
+    color:#fff;
+}
 </style>
 </head>
 <body>
@@ -50,6 +56,8 @@ canvas {
     </div>
 </div>
 
+<p id="score">Score: 0</p>
+
 <p style="margin-top:10px; font-size:13px; color:#aaa;">
 ← → 移動 / ↑ 右回転 / ↓ 落下 / Space:ハードドロップ / C:ホールド
 </p>
@@ -66,30 +74,26 @@ const COLS=10, ROWS=20, BLOCK=30;
 
 let board = Array.from({length:ROWS},()=>Array(COLS).fill(0));
 
-// 🎨 見やすい明るさ
 const colors=[
-    null,
-    "#7fc7c7","#7d8fa8","#c0916f","#d6c27a",
-    "#7fbf96","#a487c7","#c77f7f"
+    null, "#fff","#fff","#fff","#fff","#fff","#fff","#fff"
 ];
 
 const pieces=[
 [],
 [[1,1,1,1]],
-[[2,0,0],[2,2,2]],
-[[0,0,3],[3,3,3]],
-[[4,4],[4,4]],
-[[0,5,5],[5,5,0]],
-[[0,6,0],[6,6,6]],
-[[7,7,0],[0,7,7]]
+[[1,0,0],[1,1,1]],
+[[0,0,1],[1,1,1]],
+[[1,1],[1,1]],
+[[0,1,1],[1,1,0]],
+[[0,1,0],[1,1,1]],
+[[1,1,0],[0,1,1]]
 ];
 
 let nextQueue=[];
 let holdPiece=null;
 let canHold=true;
-
-// 👇 追加：履歴（3連防止）
 let history=[];
+let score=0;
 
 let player={
     x:3,
@@ -99,26 +103,20 @@ let player={
     rotated:false
 };
 
-// 🎯 修正版ランダム（3連禁止）
 function randomPiece(){
     let type;
     let attempts = 0;
-
     do {
         type = Math.floor(Math.random()*7)+1;
         attempts++;
-
         if(attempts>10) break;
-
     } while(
         history.length>=2 &&
         history[history.length-1]===type &&
         history[history.length-2]===type
     );
-
     history.push(type);
     if(history.length>2) history.shift();
-
     return type;
 }
 
@@ -131,27 +129,29 @@ function fillQueue(){
 function newPiece(){
     fillQueue();
     const type=nextQueue.shift();
-
     player.matrix=pieces[type];
     player.type=type;
     player.x=3;
     player.y=0;
     player.rotated=false;
     canHold=true;
-
     fillQueue();
     drawNext();
-
     if(collide()){
         alert("Game Over");
         board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+        score=0;
+        updateScore();
     }
 }
 
 function drawBlock(x,y,color,ctx2=ctx,size=BLOCK,alpha=1){
+    if(!color) return;
     ctx2.globalAlpha = alpha;
     ctx2.fillStyle=color;
-    ctx2.fillRect(x*size,y*size,size-1,size-1);
+    ctx2.fillRect(x*size,y*size,size,size);
+    ctx2.strokeStyle="#555";
+    ctx2.strokeRect(x*size,y*size,size,size);
     ctx2.globalAlpha = 1;
 }
 
@@ -223,7 +223,6 @@ function drawHold(){
 
 function hold(){
     if(!canHold) return;
-
     if(holdPiece===null){
         holdPiece=player.type;
         newPiece();
@@ -232,7 +231,6 @@ function hold(){
         player.matrix = pieces[player.type];
         player.x=3; player.y=0;
     }
-
     canHold=false;
     drawHold();
 }
@@ -249,7 +247,6 @@ function collide(){
     return collideAt(player.x, player.y, player.matrix);
 }
 
-// 👉 右回転固定
 function rotateCW(matrix){
     return matrix[0].map((_,i)=>matrix.map(r=>r[i]).reverse());
 }
@@ -257,7 +254,6 @@ function rotateCW(matrix){
 function playerRotate(){
     const old=player.matrix;
     player.matrix=rotateCW(player.matrix);
-
     if(collide()) player.matrix=old;
 }
 
@@ -285,6 +281,7 @@ function move(dir){
 }
 
 function clearLines(){
+    let linesCleared=0;
     outer: for(let y=ROWS-1;y>=0;y--){
         for(let x=0;x<COLS;x++){
             if(board[y][x]===0) continue outer;
@@ -292,7 +289,16 @@ function clearLines(){
         board.splice(y,1);
         board.unshift(Array(COLS).fill(0));
         y++;
+        linesCleared++;
     }
+    if(linesCleared>0){
+        score += linesCleared*100;
+        updateScore();
+    }
+}
+
+function updateScore(){
+    document.getElementById("score").innerText = "Score: "+score;
 }
 
 document.addEventListener("keydown",e=>{
@@ -310,9 +316,7 @@ function update(time=0){
     const delta=time-lastTime;
     lastTime=time;
     dropCounter+=delta;
-
     if(dropCounter>1000) playerDrop();
-
     draw();
     requestAnimationFrame(update);
 }
