@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Block Game with Score</title>
+<title>Block Game with T/N Spins</title>
 <style>
 body {
     background:#202325;
@@ -67,16 +67,12 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 const holdCtx = document.getElementById("hold").getContext("2d");
-const nextCtxs = Array.from(document.querySelectorAll(".next"))
-    .map(c=>c.getContext("2d"));
+const nextCtxs = Array.from(document.querySelectorAll(".next")).map(c=>c.getContext("2d"));
 
 const COLS=10, ROWS=20, BLOCK=30;
 
 let board = Array.from({length:ROWS},()=>Array(COLS).fill(0));
-
-const colors=[
-    null, "#fff","#fff","#fff","#fff","#fff","#fff","#fff"
-];
+const colors=[null, "#fff","#fff","#fff","#fff","#fff","#fff","#fff"];
 
 const pieces=[
 [],
@@ -85,24 +81,16 @@ const pieces=[
 [[0,0,1],[1,1,1]],
 [[1,1],[1,1]],
 [[0,1,1],[1,1,0]],
-[[0,1,0],[1,1,1]],
+[[0,1,0],[1,1,1]], // Tピース
 [[1,1,0],[0,1,1]]
 ];
 
-let nextQueue=[];
-let holdPiece=null;
-let canHold=true;
-let history=[];
-let score=0;
+let nextQueue=[], holdPiece=null, canHold=true, history=[], score=0;
+let lastRotate=false; // 回転した直後かを保持
 
-let player={
-    x:3,
-    y:0,
-    matrix:null,
-    type:0,
-    rotated:false
-};
+let player={x:3, y:0, matrix:null, type:0, rotated:false};
 
+// --- ランダムピース（3連禁止）
 function randomPiece(){
     let type;
     let attempts = 0;
@@ -110,31 +98,23 @@ function randomPiece(){
         type = Math.floor(Math.random()*7)+1;
         attempts++;
         if(attempts>10) break;
-    } while(
-        history.length>=2 &&
-        history[history.length-1]===type &&
-        history[history.length-2]===type
-    );
+    } while(history.length>=2 && history[history.length-1]===type && history[history.length-2]===type);
     history.push(type);
     if(history.length>2) history.shift();
     return type;
 }
 
-function fillQueue(){
-    while(nextQueue.length<3){
-        nextQueue.push(randomPiece());
-    }
-}
+function fillQueue(){while(nextQueue.length<3) nextQueue.push(randomPiece());}
 
 function newPiece(){
     fillQueue();
     const type=nextQueue.shift();
     player.matrix=pieces[type];
     player.type=type;
-    player.x=3;
-    player.y=0;
+    player.x=3; player.y=0;
     player.rotated=false;
     canHold=true;
+    lastRotate=false;
     fillQueue();
     drawNext();
     if(collide()){
@@ -145,6 +125,7 @@ function newPiece(){
     }
 }
 
+// --- 描画
 function drawBlock(x,y,color,ctx2=ctx,size=BLOCK,alpha=1){
     if(!color) return;
     ctx2.globalAlpha = alpha;
@@ -157,164 +138,108 @@ function drawBlock(x,y,color,ctx2=ctx,size=BLOCK,alpha=1){
 
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
-
-    board.forEach((row,y)=>{
-        row.forEach((v,x)=>{
-            if(v) drawBlock(x,y,colors[v]);
-        });
-    });
-
+    board.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(x,y,colors[v]);}));
     const ghostY = getGhostY();
-    player.matrix.forEach((row,y)=>{
-        row.forEach((v,x)=>{
-            if(v){
-                drawBlock(player.x+x, ghostY+y, colors[v], ctx, BLOCK, 0.25);
-            }
-        });
-    });
-
-    player.matrix.forEach((row,y)=>{
-        row.forEach((v,x)=>{
-            if(v) drawBlock(player.x+x,player.y+y,colors[v]);
-        });
-    });
+    player.matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(player.x+x, ghostY+y, colors[v], ctx, BLOCK, 0.25);}));
+    player.matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(player.x+x,player.y+y,colors[v]);}));
 }
 
-function getGhostY(){
-    let y = player.y;
-    while(!collideAt(player.x, y+1, player.matrix)){
-        y++;
-    }
-    return y;
-}
+// --- 衝突判定
+function getGhostY(){let y=player.y; while(!collideAt(player.x,y+1,player.matrix)) y++; return y;}
+function collideAt(px,py,matrix){for(let y=0;y<matrix.length;y++){for(let x=0;x<matrix[y].length;x++){if(matrix[y][x] && (board[py+y]&&board[py+y][px+x])!==0) return true;}} return false;}
+function collide(){return collideAt(player.x,player.y,player.matrix);}
 
-function collideAt(px, py, matrix){
-    for(let y=0;y<matrix.length;y++){
-        for(let x=0;x<matrix[y].length;x++){
-            if(matrix[y][x] &&
-              (board[py+y] &&
-               board[py+y][px+x])!==0){
-                return true;
-            }
-        }
-    }
-    return false;
-}
+// --- ミニマップ描画
+function drawMini(matrix,ctx2){ctx2.clearRect(0,0,120,120); matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) drawBlock(x+1,y+1,colors[v],ctx2,20);}));}
+function drawNext(){nextCtxs.forEach((c,i)=>drawMini(pieces[nextQueue[i]],c));}
+function drawHold(){holdCtx.clearRect(0,0,120,120); if(holdPiece) drawMini(pieces[holdPiece],holdCtx);}
 
-function drawMini(matrix,ctx2){
-    ctx2.clearRect(0,0,120,120);
-    matrix.forEach((row,y)=>{
-        row.forEach((v,x)=>{
-            if(v) drawBlock(x+1,y+1,colors[v],ctx2,20);
-        });
-    });
-}
-
-function drawNext(){
-    nextCtxs.forEach((c,i)=>{
-        drawMini(pieces[nextQueue[i]],c);
-    });
-}
-
-function drawHold(){
-    holdCtx.clearRect(0,0,120,120);
-    if(holdPiece) drawMini(pieces[holdPiece],holdCtx);
-}
-
+// --- ホールド
 function hold(){
     if(!canHold) return;
-    if(holdPiece===null){
-        holdPiece=player.type;
-        newPiece();
-    }else{
-        [holdPiece, player.type] = [player.type, holdPiece];
-        player.matrix = pieces[player.type];
-        player.x=3; player.y=0;
-    }
+    if(holdPiece===null){holdPiece=player.type; newPiece();}
+    else {[holdPiece,player.type]=[player.type,holdPiece]; player.matrix=pieces[player.type]; player.x=3; player.y=0;}
     canHold=false;
     drawHold();
 }
 
-function merge(){
-    player.matrix.forEach((row,y)=>{
-        row.forEach((v,x)=>{
-            if(v) board[player.y+y][player.x+x]=v;
-        });
-    });
-}
+// --- マージ
+function merge(){player.matrix.forEach((row,y)=>row.forEach((v,x)=>{if(v) board[player.y+y][player.x+x]=v;}));}
 
-function collide(){
-    return collideAt(player.x, player.y, player.matrix);
-}
-
-function rotateCW(matrix){
-    return matrix[0].map((_,i)=>matrix.map(r=>r[i]).reverse());
-}
-
+// --- 回転
+function rotateCW(matrix){return matrix[0].map((_,i)=>matrix.map(r=>r[i]).reverse());}
 function playerRotate(){
     const old=player.matrix;
     player.matrix=rotateCW(player.matrix);
-    if(collide()) player.matrix=old;
+    if(collide()){player.matrix=old; lastRotate=false;} else lastRotate=true;
 }
 
-function playerDrop(){
-    player.y++;
-    if(collide()){
-        player.y--;
-        merge();
-        clearLines();
-        newPiece();
+// --- 落下
+function playerDrop(){player.y++; if(collide()){player.y--; merge(); clearLines(); newPiece();} dropCounter=0;}
+function hardDrop(){player.y=getGhostY(); merge(); clearLines(); newPiece();}
+
+// --- 移動
+function move(dir){player.x+=dir; if(collide()) player.x-=dir;}
+
+// --- Tスピン判定
+function isTSpin(){
+    if(player.type!==6 || !lastRotate) return false; // Tピースかつ回転直後
+    const cx=player.x+1, cy=player.y+1;
+    let count=0;
+    const corners=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
+    corners.forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;});
+    return count>=3;
+}
+
+// --- Nスピン判定（IピースやL系も応用可）
+function isNSpin(){ // IピースやL系回転技判定
+    if(!lastRotate) return false;
+    if(player.type===1||player.type===2||player.type===3||player.type===7){
+        // 簡易：4角のうち3つ以上埋まっていたらNスピン
+        const cx=player.x+1, cy=player.y+1;
+        let count=0;
+        const corners=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
+        corners.forEach(([x,y])=>{if(y<0||y>=ROWS||x<0||x>=COLS||board[y][x]!==0) count++;});
+        return count>=3;
     }
-    dropCounter=0;
+    return false;
 }
 
-function hardDrop(){
-    player.y = getGhostY();
-    merge();
-    clearLines();
-    newPiece();
-}
-
-function move(dir){
-    player.x+=dir;
-    if(collide()) player.x-=dir;
-}
-
+// --- ライン消去
 function clearLines(){
     let linesCleared=0;
     outer: for(let y=ROWS-1;y>=0;y--){
-        for(let x=0;x<COLS;x++){
-            if(board[y][x]===0) continue outer;
-        }
+        for(let x=0;x<COLS;x++){if(board[y][x]===0) continue outer;}
         board.splice(y,1);
         board.unshift(Array(COLS).fill(0));
         y++;
         linesCleared++;
     }
     if(linesCleared>0){
-        score += linesCleared*100;
+        if(isTSpin()) score+=linesCleared*300;
+        else if(isNSpin()) score+=linesCleared*200;
+        else score+=linesCleared*100;
         updateScore();
     }
+    lastRotate=false;
 }
 
-function updateScore(){
-    document.getElementById("score").innerText = "Score: "+score;
-}
+function updateScore(){document.getElementById("score").innerText="Score: "+score;}
 
+// --- キー操作
 document.addEventListener("keydown",e=>{
     if(e.key==="ArrowLeft") move(-1);
     else if(e.key==="ArrowRight") move(1);
     else if(e.key==="ArrowDown") playerDrop();
     else if(e.key==="ArrowUp") playerRotate();
     else if(e.key===" ") hardDrop();
-    else if(e.key==="c" || e.key==="C") hold();
+    else if(e.key==="c"||e.key==="C") hold();
 });
 
+// --- アニメーション
 let dropCounter=0,lastTime=0;
-
 function update(time=0){
-    const delta=time-lastTime;
-    lastTime=time;
+    const delta=time-lastTime; lastTime=time;
     dropCounter+=delta;
     if(dropCounter>1000) playerDrop();
     draw();
